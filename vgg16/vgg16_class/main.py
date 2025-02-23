@@ -48,7 +48,7 @@ class Conv2D:
         for oc in range(self.out_channels):
             for ic in range(in_channels):
                 kernel_reshaped = self.kernels[oc, ic][np.newaxis, :, :]
-                print(f"[DEBUG] Conv2D Kernel shape {kernel_reshaped.shape}")
+                #print(f"[DEBUG] Conv2D Kernel shape {kernel_reshaped.shape}")
 
                 try:
                     output[:, oc] += correlate(input_tensor[:, ic], kernel_reshaped, mode='valid')
@@ -76,25 +76,45 @@ class Conv2D:
         else:
             padded_input = self.input
 
-        # Tính gradient cho kernels
+        # [DEBUG] Kiểm tra shape trước khi tính toán gradient
+        print(f"[DEBUG] d_output shape: {d_output.shape}")
+        print(f"[DEBUG] padded_input shape: {padded_input.shape}")
+        print(f"[DEBUG] d_input shape: {d_input.shape}")
+
+        # Tính gradient cho kernels (d_kernels)
         for oc in range(self.out_channels):
             for ic in range(in_channels):
                 for b in range(batch_size):
                     d_kernels[oc, ic] += correlate(padded_input[b, ic], d_output[b, oc], mode='valid')
 
-        # Tính gradient của input
+        # Tính gradient cho input (d_input)
         for ic in range(in_channels):
             for oc in range(self.out_channels):
                 flipped_kernel = np.flip(self.kernels[oc, ic], axis=(0, 1))
                 for b in range(batch_size):
-                    d_input[b, ic] += convolve(d_output[b, oc], flipped_kernel, mode='full')
+                    conv_result = convolve(d_output[b, oc], flipped_kernel, mode='full')
 
-        # Cập nhật trọng số
+                    # Đảm bảo gradient có cùng shape với `d_input`
+                    expected_shape = d_input.shape[2:]  # (height, width)
+                    crop_h = (conv_result.shape[0] - expected_shape[0]) // 2
+                    crop_w = (conv_result.shape[1] - expected_shape[1]) // 2
+
+                    if crop_h > 0 or crop_w > 0:
+                        conv_result = conv_result[crop_h:-crop_h, crop_w:-crop_w]
+
+                    d_input[b, ic] += conv_result
+
+        # Cập nhật trọng số (Gradient Descent)
         self.kernels -= self.lr * d_kernels
 
+        # Fix lỗi: Lưu gradient để các layer sau sử dụng
+        self.dinputs = d_input  
+
+        # [DEBUG] Kiểm tra shape sau khi backward
+        print(f"[DEBUG] d_kernels shape: {d_kernels.shape}")
+        print(f"[DEBUG] d_input shape: {d_input.shape}")
+
         return d_input
-
-
 
 class Linear:
     def __init__(self, in_features, out_features):
@@ -912,7 +932,7 @@ def load_images_from_folder(folder, label, image_size=(224, 224)):
     return images, labels
 
 # Mở file để ghi
-log_file = open("output10.log", "w")
+log_file = open("output13.log", "w")
 
 # Ghi cả stdout và stderr vào file
 sys.stdout = log_file
